@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 #
 # datapipe documentation build configuration file, created by
-# sphinx-quickstart on Thu Dec  8 22:53:39 2016.
+# sphinx-quickstart on Fri Dec  9 00:10:42 2016.
 #
 # This file is execfile()d with the current directory set to its
 # containing dir.
@@ -19,7 +19,6 @@
 # import os
 # import sys
 # sys.path.insert(0, os.path.abspath('.'))
-from recommonmark.parser import CommonMarkParser
 
 
 # -- General configuration ------------------------------------------------
@@ -33,28 +32,29 @@ from recommonmark.parser import CommonMarkParser
 # ones.
 extensions = ['sphinx.ext.autodoc',
               'sphinx.ext.coverage',
-              'sphinx.ext.viewcode']
+              'sphinx.ext.viewcode',
+              'sphinx.ext.githubpages']
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
-
-source_parsers = {
-    '.md': CommonMarkParser,
-}
 
 # The suffix(es) of source filenames.
 # You can specify multiple suffix as a list of string:
 #
 source_suffix = ['.rst', '.md']
 # source_suffix = '.rst'
+from recommonmark.parser import CommonMarkParser  # noqa
+source_parsers = {
+    '.md': CommonMarkParser,
+}
 
 # The master toctree document.
 master_doc = 'index'
 
 # General information about the project.
 project = u'datapipe'
-copyright = u'2016, Jay Young'
-author = u'Jay Young'
+copyright = u'2016, yjmade'
+author = u'yjmade'
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
@@ -75,7 +75,7 @@ language = None
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
 # This patterns also effect to html_static_path and html_extra_path
-exclude_patterns = []
+exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 
 # The name of the Pygments (syntax highlighting) style to use.
 pygments_style = 'sphinx'
@@ -134,7 +134,7 @@ latex_elements = {
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
     (master_doc, 'datapipe.tex', u'datapipe Documentation',
-     u'Jay Young', 'manual'),
+     u'yjmade', 'manual'),
 ]
 
 
