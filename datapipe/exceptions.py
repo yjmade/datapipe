@@ -1,22 +1,23 @@
 # -*- coding: utf-8 -*-
 class PipeBreak(Exception):
 
-    u"停止,回滚当前item"
+    """stop all the operation, and rollback current item"""
     pass
 
 
 class PipeError(Exception):
 
-    u"停止,回滚全部"
+    """停止,回滚全部"""
+    pass
 
 
 class PipeIgnore(Exception):
 
-    u"忽略当前item,回滚当前item的sql,继续下一个"
+    """ignore and rollback for this item, and keep going for next item"""
     pass
 
 
 class PipeContinue(Exception):
 
-    u"""忽略后面操作,不回滚,继续下一个"""
+    """like continue, do not rollback the operation, but give up all the coming operation and keep going for next item"""
     pass
