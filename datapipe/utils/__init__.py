@@ -1,27 +1,6 @@
 # -*- coding: utf-8 -*-
 from collections import defaultdict
-
-
-class cached_property(object):  # noqa
-
-    """
-    Decorator that converts a method with a single self argument into a
-    property cached on the instance.
-
-    Optional ``name`` argument allows you to make cached properties of other
-    methods. (e.g.  url = cached_property(get_absolute_url, name='url') )
-    """
-
-    def __init__(self, func, name=None):
-        self.func = func
-        self.__doc__ = getattr(func, '__doc__')
-        self.name = name or func.__name__
-
-    def __get__(self, instance, type=None):
-        if instance is None:
-            return self
-        res = instance.__dict__[self.name] = self.func(instance)
-        return res
+from django.utils.functional import cached_property, SimpleLazyObject  # noqa
 
 
 class GroupIgnore(object):
@@ -67,3 +46,41 @@ class cached_class_property(property):  # noqa
     def __set__(self, obj, value):
         cache_name = "_cache_%s_%s" % (obj.__class__.__name__, self.name)
         setattr(obj, cache_name, value)
+
+
+def get_ct_model_map():
+    from django.contrib.contenttypes.models import ContentType
+    return {ct.model_class(): ct.id for ct in ContentType.objects.all()}
+
+
+ct_model_map = SimpleLazyObject(get_ct_model_map)
+
+
+model_ct_map = SimpleLazyObject(
+    lambda: {ct: model for model, ct in ct_model_map.iteritems()}
+)
+
+
+def changeStyle(string, auto=True, toCamel=False):  # noqa
+    if auto:
+        try:
+            toCamel = string.index("_") >= 0  # noqa
+        except ValueError:
+            pass
+
+    if toCamel:
+        s1 = string.split("_")
+        return "".join([s.capitalize() for s in s1])
+    else:
+        s1 = ""
+        for s in string:
+            if s.isupper():
+                s = "_" + s.lower()
+            s1 += s
+        if s1[0] == "_":
+            s1 = s1[1:]
+        return s1
+
+
+from .iter import progressbar_iter, queryset_iterator  # noqa
+from .datastructures import *  # noqa

@@ -3,13 +3,16 @@ import sys
 from itertools import chain
 from collections import OrderedDict, defaultdict
 from django.db import models
-from ..utils import group_by, queryset_iterator, changeStyle, progressbar_iter, obj, in_chunk, ct_model_map
-from mptt.models import MPTTModel
 from django.conf import settings
 from django.db.transaction import atomic
+from django.utils.module_loading import autodiscover_modules
+from .utils import group_by, queryset_iterator, changeStyle, progressbar_iter, in_chunk, ct_model_map
 from .models import PipelineTrack, PipelineError
 from .exceptions import PipeIgnore, PipeContinue, PipeBreak
-from django.utils.module_loading import autodiscover_modules
+try:
+    from mptt.models import MPTTModel
+except ImportError:
+    MPTTModel = None
 
 import logging
 logger = logging.getLogger("pipeline")
@@ -232,7 +235,7 @@ class Pipeline(object):
         items_result, self.items_result = self.items_result, {}
         grouped_to_save = group_by(chain(*to_save.itervalues()), lambda x: type(x))
         for cls, items in grouped_to_save.iteritems():
-            if issubclass(cls, MPTTModel):
+            if MPTTModel and issubclass(cls, MPTTModel):
                 with cls.objects.disable_mptt_updates():
                     for item in items:
                         item.lft = item.rght = item.level = item.tree_id = 0
