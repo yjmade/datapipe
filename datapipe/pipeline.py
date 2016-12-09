@@ -6,7 +6,7 @@ from django.db import models
 from django.conf import settings
 from django.db.transaction import atomic
 from django.utils.module_loading import autodiscover_modules
-from .utils import group_by, queryset_iterator, changeStyle, progressbar_iter, in_chunk, ct_model_map
+from .utils import group_by, queryset_iterator, changeStyle, progressbar_iter, in_chunk, ct_model_map, obj
 from .models import PipelineTrack, PipelineError
 from .exceptions import PipeIgnore, PipeContinue, PipeBreak
 try:
@@ -44,15 +44,19 @@ class Pipeline(object):
         autodiscover_modules("pipes")
         PIPE_IMPORTED = True
 
-    def get_default_name(self, items):
+    def _get_default_name(self, items):
+        if isinstance(items, models.QuerySet):
+            if hasattr(items, "get_default_pipe_name"):
+                return items.get_default_pipe_name()
+
         try:
             item = items[0]
         except IndexError:
             return None
-        try:
-            return item.default_pipe_name
-        except AttributeError:
-            return None
+
+        if hasattr(item, "get_default_pipe_name"):
+            return item.get_default_pipe_name()
+        return None
 
     def run(self, items, name, celery_chunksize=10, **kwargs):
         if isinstance(items, models.QuerySet):
@@ -79,7 +83,7 @@ class Pipeline(object):
         else:
             name = name + ".default" if name and "." not in name else name
             if name is None:
-                name = self.get_default_name(items)
+                name = self._get_default_name(items)
             assert name, "Must define which pipeline to run"
             self.pipe = self.get_pipe(name)
         self.process_start(name)
@@ -142,7 +146,7 @@ class Pipeline(object):
                 if self.debug:
                     raise error_class, error_obj, error_tb
                 else:
-                    self.process_exception(item, error_tb, error_obj,)
+                    self.process_exception(item, error_tb, error_obj)
                 self.errors.append((item, error_obj, error_tb))
             finally:
                 del error_class, error_obj, error_tb
