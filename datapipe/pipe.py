@@ -3,7 +3,7 @@ from collections import OrderedDict
 from itertools import chain
 from contextlib import contextmanager
 from django.db import models
-from .utils import group_by, cached_class_property
+from .utils import group_by, cached_class_property, ct_model_map
 from .exceptions import PipeIgnore, PipeContinue, PipeBreak
 
 
@@ -106,7 +106,7 @@ class BasePipe(object):
             self.finish(commited, error_info or None)
 
     @classmethod
-    def reg(cls, route, sequence=None, trigger=None, triggers=None):
+    def register(cls, route, sequence=None, trigger=None, triggers=None):
         triggers = triggers if triggers else [trigger] if trigger else []
         route_elements = route.split(".")
         if len(route_elements) == 1:
@@ -209,4 +209,4 @@ class Pipe(BasePipe):
             self.tracker_cls.revert_batch(*chain(*(trackers for trackers in self.local._track_logs.itervalues())))
         super(Pipe, self).finish(commited, exceptions)
 
-pipe = Pipe.reg
+pipe = Pipe.register
