@@ -130,7 +130,7 @@ class BasePipe(object):
         return warper
 
     @classmethod
-    def run(cls, *items):
+    def eval(cls, *items):
         # self.name=self.__name__
         # local=obj()
         # context=obj()

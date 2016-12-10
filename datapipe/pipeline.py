@@ -21,7 +21,7 @@ PIPE_IMPORTED = False
 
 
 class Pipeline(object):
-    _mode = "seq"
+    _mode = "seq"  # or gevent
     pipes = defaultdict(OrderedDict)
     triggers = defaultdict(list)
     _pipe_cache = {}
@@ -58,7 +58,7 @@ class Pipeline(object):
             return item.get_default_pipe_name()
         return None
 
-    def run(self, items, name, celery_chunksize=10, **kwargs):
+    def run_in_celery(self, items, name, celery_chunksize=10, queue=None, **kwargs):
         if isinstance(items, models.QuerySet):
             ids = list(items.values_list("id", flat=True))
             model = items.model
@@ -67,14 +67,14 @@ class Pipeline(object):
             model = type(item)
         from celery import current_app as celery
         for chunk_ids in in_chunk(ids, celery_chunksize):
-            celery.send_task("data.run_pipe", kwargs={
+            celery.send_task("datapipe.run", kwargs={
                 "item_ct_id": ct_model_map[model],
                 "items_id": chunk_ids,
                 "name": name,
                 "options": kwargs
-            }, queue=settings.TEMP_QUEUE_NAME)
+            }, queue=queue)
 
-    def process(self, items, name=None, with_old_items={}, pipe=None):
+    def run(self, items, name=None, with_old_items={}, pipe=None):
         assert not (name and pipe), "Pipe and name can be specify only one of them"
         if pipe:
             name = pipe.__name__
@@ -99,7 +99,7 @@ class Pipeline(object):
         self.fire_trigger(name)
 
     def _to_process(self, items, with_old_items=None):
-        # 多级流水
+        # multi level pipeline
         for depend in self.pipe.depends:
             depend_pipe = self.get_pipe(depend)
             if depend_pipe.mode not in ("auto", self._mode):

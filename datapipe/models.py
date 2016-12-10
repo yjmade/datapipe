@@ -45,9 +45,9 @@ class PipelineError(BaseError):
     def do_fix_it(self, items, in_celery=True, **options):
         from .pipeline import Pipeline
         if in_celery:
-            Pipeline().run(items, self.pipeline_name)
+            Pipeline().run_in_celery(items, self.pipeline_name)
         else:
-            Pipeline(**options).process(items, name=self.pipeline_name)
+            Pipeline(**options).run(items, name=self.pipeline_name)
 
 
 class PipelineTrack(models.Model):
