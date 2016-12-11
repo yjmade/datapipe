@@ -3,10 +3,10 @@
 from setuptools import setup, find_packages
 import sys
 
-if 'bdist_wheel' in sys.argv:
+if 'sdist' in sys.argv:
     from pypandoc import convert
     long_description = convert('README.md', 'rst')
-VERSION = "0.0.23"
+VERSION = "0.1.0"
 
 setup(
     name='datapipe',
@@ -17,14 +17,9 @@ setup(
     author='Jay Young(yjmade)',
     author_email='dev@yjmade.net',
     packages=find_packages(),
-    install_requires=["django-errorlog", "celery<4.0", "django-celery"],
+    install_requires=["django-errorlog", "celery<4.0", "django-celery", "django-pgjsonb"],
     classifiers=[
-        'Development Status :: 4 - Beta',
         'Intended Audience :: Developers',
-        'License :: OSI Approved :: ISC License (ISCL)',
-        'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.4',
-        'Programming Language :: Python :: 3.5',
     ],
     license='MIT',
     keywords='data processing pipeline',
