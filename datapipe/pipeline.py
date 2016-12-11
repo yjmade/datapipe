@@ -76,17 +76,19 @@ class Pipeline(object):
 
     def run(self, items, name=None, with_old_items={}, pipe=None):
         assert not (name and pipe), "Pipe and name can be specify only one of them"
+        self.process_start(name)
         if pipe:
             name = pipe.__name__
             pipe.name = name
             self.pipe = pipe
+            return_results = True
         else:
             name = name + ".default" if name and "." not in name else name
             if name is None:
                 name = self._get_default_name(items)
             assert name, "Must define which pipeline to run"
             self.pipe = self.get_pipe(name)
-        self.process_start(name)
+            return_results = False
         items = items if isinstance(items, (list, tuple, models.QuerySet)) else [items]
 
         if self.debug and self.atomic:
@@ -97,20 +99,22 @@ class Pipeline(object):
         if not self.results:
             return
         self.fire_trigger(name)
+        if return_results:
+            return self.results[0]
 
     def _to_process(self, items, with_old_items=None):
         # multi level pipeline
         for depend in self.pipe.depends:
             depend_pipe = self.get_pipe(depend)
-            if depend_pipe.mode not in ("auto", self._mode):
-                from . import get_pipeline
-                pp_cls = get_pipeline(depend_pipe.mode)
-            else:
-                pp_cls = type(self)
+            # if depend_pipe.mode not in ("auto", self._mode):
+            from . import get_pipeline
+            # pp_cls = get_pipeline(depend_pipe.mode)
+            # else:
+            # pp_cls = type(self)
 
-            pp = pp_cls(context=self.context, debug=self.debug, chunksize=self.chunksize, atomic=False)
-            print("need to run Dependancy:%s" % depend)
-            pp.process(items, name=depend)
+            print("running dependancy:%s" % depend)
+            get_pipeline(mode=depend_pipe.mode, context=self.context, debug=self.debug, chunksize=self.chunksize, atomic=False)\
+                .run(items, name=depend)
         # prepare items
         print "preparing %s" % self.pipe.__name__
         self.local.with_old_items = with_old_items
@@ -167,17 +171,17 @@ class Pipeline(object):
     def get_pipe(self, name):
         name = name + ".default" if "." not in name else name
         try:
-            pipe = self._pipe_cache[name]
+            pipe_cls = self._pipe_cache[name]
         except KeyError:
             assert name in self.pipes, "no %s pipes found" % name
             pipes = self.pipes[name].keys()
             pipes.reverse()
-            pipe = self._pipe_cache[name] = type(
+            pipe_cls = self._pipe_cache[name] = type(
                 str("%sPipe" % changeStyle(name.replace(".", "_"))),
                 tuple(pipes),
                 {"name": name}
             )
-        return pipe
+        return pipe_cls
 
     def process_start(self, name):
         self.to_save = {}
@@ -218,7 +222,7 @@ class Pipeline(object):
         if triggers:
             p = type(self)(context=self.context, debug=self.debug, chunksize=self.chunksize, atomic=True, trigger_from_name=name)
             for trigger_name in triggers:
-                p.process(self.results, with_old_items=self.old_results, name=trigger_name)
+                p.run(self.results, with_old_items=self.old_results, name=trigger_name)
 
         if "deleted_trackers" in locals():
             for tracker in deleted_trackers:

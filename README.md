@@ -19,7 +19,11 @@ If you do `error.fix()` before you fixed code in place, it's doesn't matter, bec
 Change Logs
 ===========
 2016-12-04: 0.1.0
-Initial submit. Split the code from the online project. Write the documents, and add the tests. 
+Initial submit. Split the code from the online project. Write the documents, and add the tests.
+ 
+*****
+
+
 
 
 Install

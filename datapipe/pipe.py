@@ -130,7 +130,7 @@ class BasePipe(object):
         return warper
 
     @classmethod
-    def eval(cls, *items):
+    def eval(cls, item):
         # self.name=self.__name__
         # local=obj()
         # context=obj()
@@ -139,7 +139,7 @@ class BasePipe(object):
         #         cls(item=item,context=context,local=local).process()
         from .pipeline import Pipeline
         p = Pipeline()
-        return p.process(items, pipe=cls)
+        return p.run([item], pipe=cls)
 
 
 class Pipe(BasePipe):
