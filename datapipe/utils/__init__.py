@@ -82,5 +82,5 @@ def changeStyle(string, auto=True, toCamel=False):  # noqa
         return s1
 
 
-from .iter import progressbar_iter, queryset_iterator  # noqa
+from .iter import progressbar_iter, queryset_iterator, in_chunk  # noqa
 from .datastructures import *  # noqa
