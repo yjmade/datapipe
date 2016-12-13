@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
-from .pipe import Pipe, pipe, ct_model_map  # noqa
-
-
-def get_pipeline(mode=None, **options):
+def get_session(mode=None, **options):
     if mode == "gevent":
-        from .gv import Pipeline
+        from .gv import Session
     else:
-        from .pipeline import Pipeline
-    return Pipeline(**options)
+        from .pipeline import Session
+    return Session(**options)
+
+from .pipe import Pipe, pipeline, ct_model_map  # noqa

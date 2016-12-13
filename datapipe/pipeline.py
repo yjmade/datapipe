@@ -9,6 +9,7 @@ from django.utils.module_loading import autodiscover_modules
 from .utils import group_by, queryset_iterator, changeStyle, progressbar_iter, in_chunk, ct_model_map, obj
 from .models import PipelineTrack, PipelineError
 from .exceptions import PipeIgnore, PipeContinue, PipeBreak
+from . import get_session
 try:
     from mptt.models import MPTTModel
 except ImportError:
@@ -20,7 +21,7 @@ logger = logging.getLogger("pipeline")
 PIPE_IMPORTED = False
 
 
-class Pipeline(object):
+class Session(object):
     _mode = "seq"  # or gevent
     pipes = defaultdict(OrderedDict)
     triggers = defaultdict(list)
@@ -58,7 +59,7 @@ class Pipeline(object):
             return item.get_default_pipe_name()
         return None
 
-    def run_in_celery(self, items, name, celery_chunksize=10, queue=None, **kwargs):
+    def run_in_celery(self, items, name=None, with_old_items={}, celery_chunksize=10, queue=None):
         if isinstance(items, models.QuerySet):
             ids = list(items.values_list("id", flat=True))
             model = items.model
@@ -71,12 +72,18 @@ class Pipeline(object):
                 "item_ct_id": ct_model_map[model],
                 "items_id": chunk_ids,
                 "name": name,
-                "options": kwargs
+                "with_old_items": with_old_items,
+                "options": {
+                    "debug": self.debug,
+                    "chunksize": self.chunksize,
+                    "direct_save": self.direct_save,
+                    "atomic": self.atomic,
+                    "trigger_from_name": self.trigger_from_name,
+                }
             }, queue=queue)
 
     def run(self, items, name=None, with_old_items={}, pipe=None):
         assert not (name and pipe), "Pipe and name can be specify only one of them"
-        self.process_start(name)
         if pipe:
             name = pipe.__name__
             pipe.name = name
@@ -89,6 +96,9 @@ class Pipeline(object):
             assert name, "Must define which pipeline to run"
             self.pipe = self.get_pipe(name)
             return_results = False
+
+        self.process_start(name)
+
         items = items if isinstance(items, (list, tuple, models.QuerySet)) else [items]
 
         if self.debug and self.atomic:
@@ -107,13 +117,12 @@ class Pipeline(object):
         for depend in self.pipe.depends:
             depend_pipe = self.get_pipe(depend)
             # if depend_pipe.mode not in ("auto", self._mode):
-            from . import get_pipeline
-            # pp_cls = get_pipeline(depend_pipe.mode)
+            # pp_cls = get_session(depend_pipe.mode)
             # else:
             # pp_cls = type(self)
 
             print("running dependancy:%s" % depend)
-            get_pipeline(mode=depend_pipe.mode, context=self.context, debug=self.debug, chunksize=self.chunksize, atomic=False)\
+            get_session(mode=depend_pipe.mode, context=self.context, debug=self.debug, chunksize=self.chunksize, atomic=False)\
                 .run(items, name=depend)
         # prepare items
         print "preparing %s" % self.pipe.__name__
@@ -161,12 +170,12 @@ class Pipeline(object):
         PipelineError.from_except(self.pipe.name, item, error_tb, error_obj).save()
 
     def process_each(self, item):
-        pipe = self.pipe(item=item, pipeline=self, context=self.context, local=self.local, direct_save=self.direct_save)
+        pipe = self.pipe(item=item, session=self, context=self.context, local=self.local, direct_save=self.direct_save)
         try:
             res = pipe.process()
         except PipeContinue as e:
             res = e.message  # continue as valid result
-        pipe.contribute_to_pipeline(res)
+        pipe.contribute_to_session(res)
 
     def get_pipe(self, name):
         name = name + ".default" if "." not in name else name

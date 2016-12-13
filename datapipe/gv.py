@@ -2,15 +2,15 @@
 import sys
 import gevent
 from gevent.queue import Queue, Empty
-from .pipeline import Pipeline as NormalPipeline, queryset_iterator, PipeIgnore, PipeBreak
+from .pipeline import Session as NormalSession, queryset_iterator, PipeIgnore, PipeBreak
 from django.db import close_old_connections
 
 
-class Pipeline(NormalPipeline):
+class Session(NormalSession):
     _mode = "gevent"
 
     def __init__(self, worker=100, *args, **kwargs):
-        super(Pipeline, self).__init__(*args, **kwargs)
+        super(Session, self).__init__(*args, **kwargs)
         self._worker_count = worker
 
     def _process_atomic(self, items, name, debug, chunksize, count, error_items, direct_save, pg):

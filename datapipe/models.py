@@ -42,12 +42,13 @@ class PipelineError(BaseError):
 
         return super(PipelineError, cls).from_except(name, tb, exception, **data)
 
-    def do_fix_it(self, items, in_celery=True, **options):
-        from .pipeline import Pipeline
+    def do_fix_it(self, items, in_celery=True, queue=None, **options):
+        from . import get_session
+        sess = get_session(**options)
         if in_celery:
-            Pipeline().run_in_celery(items, self.pipeline_name)
+            sess.run_in_celery(items, self.pipeline_name, queue=queue)
         else:
-            Pipeline(**options).run(items, name=self.pipeline_name)
+            sess.run(items, self.pipeline_name)
 
 
 class PipelineTrack(models.Model):

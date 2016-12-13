@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 from ..models import SourceItem, ResultItem
-from datapipe.pipe import Pipe, pipe
+from datapipe.pipe import Pipe, pipeline
 
 
 class GradualSum(Pipe):
@@ -27,7 +27,7 @@ class DiscountSum(GradualSum):
         return item
 
 
-@pipe("discount_sum")
+@pipeline("discount_sum")
 class Save(DiscountSum):
     result_model = ResultItem
 

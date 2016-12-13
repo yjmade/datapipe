@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from django.db import models
 from .utils import group_by, cached_class_property, ct_model_map
 from .exceptions import PipeIgnore, PipeContinue, PipeBreak
+from . import get_session
 
 
 class PipeMeta(type):
@@ -25,9 +26,9 @@ class BasePipe(object):
     mode = "auto"
     # mode can be "seq","gevent" or "auto"
 
-    def __init__(self, item=None, pipeline=None, context=None, local=None, direct_save=False):
+    def __init__(self, item=None, session=None, context=None, local=None, direct_save=False):
         self.item = item
-        self.pipeline = pipeline
+        self.session = session
         self.context = context if context is not None else {}
         self.local = local if local is not None else {}
         self.direct_save = getattr(self, "force_direct_save", direct_save)
@@ -59,15 +60,15 @@ class BasePipe(object):
 
     track = True
 
-    def contribute_to_pipeline(self, result):
+    def contribute_to_session(self, result):
         if self.to_save:
-            self.pipeline.to_save[self.item] = self.to_save
-            self.pipeline.to_save_size += len(self.to_save)
+            self.session.to_save[self.item] = self.to_save
+            self.session.to_save_size += len(self.to_save)
         if self.saved_items:
-            self.pipeline.saved_items[self.item] = self.saved_items
+            self.session.saved_items[self.item] = self.saved_items
         if result and isinstance(result, models.Model):
-            self.pipeline.results.append(result)
-            self.pipeline.items_result[self.item] = result
+            self.session.results.append(result)
+            self.session.items_result[self.item] = result
 
     Ignore = PipeIgnore
     Break = PipeBreak
@@ -91,7 +92,7 @@ class BasePipe(object):
 
     @contextmanager
     def set_context(self, items):
-        error_info = self.pipeline.errors if self.pipeline else None
+        error_info = self.session.errors if self.session else None
         commited = False
         try:
             yield self.prepare(items)
@@ -113,18 +114,18 @@ class BasePipe(object):
             route += ".default"
 
         def warper(klass):
-            from .pipeline import Pipeline
+            from .pipeline import Session
             assert issubclass(klass, Pipe), "klass must be type of Pipe"
-            # 处理route
-            seq = sequence or (Pipeline.pipes[route].values()[-1] + 1 if Pipeline.pipes[route] else 0)
-            Pipeline.pipes[route][klass] = seq
-            filter_list = Pipeline.pipes[route].items()
+            # route
+            seq = sequence or (Session.pipes[route].values()[-1] + 1 if Session.pipes[route] else 0)
+            Session.pipes[route][klass] = seq
+            filter_list = Session.pipes[route].items()
             filter_list.sort(key=lambda x: x[1])
-            Pipeline.pipes[route] = OrderedDict(filter_list)
-            # 处理trigger
+            Session.pipes[route] = OrderedDict(filter_list)
+            # trigger
             for trigger in triggers:
-                if route not in Pipeline.triggers[trigger]:
-                    Pipeline.triggers[trigger].append(route)
+                if route not in Session.triggers[trigger]:
+                    Session.triggers[trigger].append(route)
             return klass
 
         return warper
@@ -137,9 +138,7 @@ class BasePipe(object):
         # with cls(context=context,local=local).set_context(items) as items:
         #     for item in items:
         #         cls(item=item,context=context,local=local).process()
-        from .pipeline import Pipeline
-        p = Pipeline()
-        return p.run([item], pipe=cls)
+        return get_session().run([item], pipe=cls)
 
 
 class Pipe(BasePipe):
@@ -199,14 +198,14 @@ class Pipe(BasePipe):
         self.prepare_repocessing(items)
         return items
 
-    def contribute_to_pipeline(self, result):
-        super(Pipe, self).contribute_to_pipeline(result)
+    def contribute_to_session(self, result):
+        super(Pipe, self).contribute_to_session(result)
         if self.local._enable_reparse and hasattr(self, "_old_result"):
-            self.pipeline.old_results.append((result, self._old_result))
+            self.session.old_results.append((result, self._old_result))
 
     def finish(self, commited, exceptions):
         if commited and self.local._enable_reparse and self.local._track_logs:
             self.tracker_cls.revert_batch(*chain(*(trackers for trackers in self.local._track_logs.itervalues())))
         super(Pipe, self).finish(commited, exceptions)
 
-pipe = Pipe.register
+pipeline = Pipe.register
