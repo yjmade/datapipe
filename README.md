@@ -1,86 +1,94 @@
-# django-celery-errorlog
-Reuseable app for django to collect the unexpted exception and generate comprehansive report just like what you get in debug mode and store in database from celery task
+# DataPipe
+*a data processing framework let you build workflow just like making building blocks, and make it run in parallels*
 
-Introduction
-============
-This is a extension of [django-errorlog](https://pypi.python.org/pypi/django-errorlog) to bring support of celery task with some other features.
-I love Celery, but sometimes when there are bugs hiding in the celery tasks code, and the code has already running as deamon in the background of the production server, you will find it's hard to track and debug the error. More importantly, when a unhandled exception happened, that's also means the task failed, and the arguments send to this task will be losed.
-To solve this problem, this app wrap you task function inside a database transaction, when unhandled exception been catched by the wrapper, it will do this following stuff:
+##Concept
+In the project of the company, we are facing few challenges.
 
-1. rollback this transaction
-2. get the exception and traceback to generate a HTML error report as same as the Django buildin 500 page when `DEBUG=True`, which contains the stack trace also the varibles in each stack. That make it much easier to debug.
-3. record the arguments of this task
-4. get the error categorized
+- Input data come from different sources, like spiders, logs, they are in different machine, have to have a way to collect them together, and need to be processed as soon as possible.
+- The input data get different types, need different flow to process.
+- For each flow, it get multiple steps to finish the work. For example, say I crawled a news website, so I need to see if the news has already existed in the database, then check if the author has already created, then check if the content is valid, then clean up the content... Finally, save the result to database. Some of the steps can be share between different flow, and some are not. Some step can be irelevent to the other steps so that it should be able to plug into the flow. So we want to build each step seperately, like a LEGO building block. Then assemble them together. If we do it right, the code should be clean, easy to read, easy to write, easy to maintain.
+- The data source like spider to provide input data may get problem, processing flow itself can have bugs too. So we need to track what has been write to database after one specific input data item has been processed, and be able to erase the outcome and reprocessing when feed the flow with the same item.
+- When bug happend, error and the enviroment should be logged, then rollback the database operation has been done related to this input item. After the issue has been addressed, be able to put the items which throwed the error to the flow again with one single click.
+- When multiple result comes, be able to run them in parallels.
+- If the speed of processing is not enough, can easily scale up the workers.
+- Be able to monitor what the status of process going.
+- All the boring staff just mentioned which has nothing to do with the processing flow, should be shared as much as possible, so that developer can put most attention to the building of the flow itself. 
 
-So, after error happened, you can check the `CeleryError.unfixed_errors`, then fix the code, restart the worker, then run `error.fix()` to send this task back to the queue again to make sure all task will be run.
+With all these requirments, I build this module. And it has been there and running for 2 years. Now I open source it, to share it as a infrastructure.
 
-If you do `error.fix()` before you fixed code in place, it's doesn't matter, because even the old error has been mark as fixed, since the same error will be raised again, so you will get new error with same parameters.  
+##Prerequest
+Since we love python, and the project of the company is build up of the Django, so datapipe is made as a Django reusable module.
 
-Change Logs
-===========
-2016-12-04: 0.1.0
-Initial submit. Split the code from the online project. Write the documents, and add the tests.
- 
-*****
+Also, some of the feature is rely on the postgres's jsonb field, so at least you have to configure the PipelineTrack model to link to the postgres database.
 
+##How it work
+In the project, we build all the processing procedure with datapipe, and running it as a daemon. Then, have a MQ(Message Queue) to link to daemon with different data sources. And each different data source will throw raw data into the MQ, and datapipe start to process it one by one parallels.
 
-
-
-Install
-=======
- 
-```bash
-pip install django-celery-errorlog
-```
-Then modify the settings
- 
-1. Follow the instruction of [django-errorlog](https://pypi.python.org/pypi/django-errorlog) to set it up properly 
-2. set up djcelery properly
-3. Add `djcelery-errorlog` into `INSTALLED_APPS` after `errorlog`
-
-Then do `python manage.py migrate` to setup the database table.
-
-
-
-Usage
-=====
-In tasks.py, you have to change the import of `shared_task` and `periodic_task` from `celery` to `djcelery_errorlog` to make errorlog work, here is the example
+Here is a example of how the datapipe looks like: [source](https://github.com/yjmade/datapipe/blob/master/tests/simple/pipes/__init__.py)
 
 ```python
 # -*- coding: utf-8 -*-
-from djcelery_errorlog import shared_task
+from ..models import SourceItem, ResultItem
+from datapipe.pipe import Pipe, pipeline
 
 
-@shared_task(name="tests")
-def tests(**kwargs):
-    raise ValueError(kwargs)
+class GradualSum(Pipe):
+
+    def prepare(self, items):
+        assert isinstance(items[0], SourceItem)
+        self.context.total = 0
+        return super(GradualSum, self).prepare(items)
+
+    def process(self):
+        item = super(GradualSum, self).process()
+        self.context.total += item.number
+        self.total = self.context.total
+        return item
+
+
+class DiscountSum(GradualSum):
+    discount = 0.99
+
+    def process(self):
+        item = super(DiscountSum, self).process()
+
+        self.total *= self.discount
+        return item
+
+
+@pipeline("discount_sum")
+class Save(DiscountSum):
+    result_model = ResultItem
+
+    def process(self):
+        item = super(Save, self).process()
+
+        self.add_to_save(self.result_model(number=self.total))
+        return item
 
 ```
-That's it, now when there is uncatched exception been throwed, CeleryError will record the invoke parameter and stack trace.
 
+To run it like this:
 
- buildin shell command(same as django-errorlog)
-------------------
 ```python
->>> from djcelery_errorlog.models import CeleryError
->>> CeleryError.unfixed_errors
-{0: <CeleryError:     1 - test1 - ValueError: A>,
- 1: <CeleryError:     4 - test2 - ValueError: B>}
->>> error = CeleryError.unfixed_errors[1]
->>> error
- 1: <CeleryError:     4 - test1 - ValueError: B>
->>> # in this repr, the first number is the index to make it easy to select; 
->>> # the second number 4 is the the count of the same error happened;
->>> # test1 is the name of the task;
->>> # ValueError is the exception type; 
->>> # B is the args in the exception.
->>> error.vcs_rev # the git/hg version of error, for hg, it's the incremental number that is orderable
-"1"
->>> error.ignore() # this command ignore the whole 4 error logs
+from datapipe import get_session
+sess=get_session()
+sess.run("discount_sum",SourceItem.objects.all())
 ```
+###Explain
+`SourceItem` is the input items, and the result will be put into `ResultItem`. Both of them are django Model with only a integer field name as number.
 
-Fix the error
-------
-After you fixed the code base on the error been tracked, you can do `error.fix([queue="queue_name"])` to get the task with same parameter run again. Remember, when you run fix on one error, all same errors will be send to the celery worker and marked as fixed.
+There are three main concept in datapipe:
+
+- `Pipe` is a single data processing step
+- `Pipeline` is the assemble of multiple Pipes to one procedure. 
+- `Session` in charge of manage the running Pipelines.
+
+In the above example, we have build one `Pipeline` with 3 `Pipe`.
+
+datapipe uses python buildin class inheritance to assemble the Pipes together. So, the 1st step pipe is a class inherit from `Pipe`, and 2nd step pipe just inherit from the 1st. 
 
 
+
+##TODO
+get the reparse entity in the pipe
