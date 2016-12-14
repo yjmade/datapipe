@@ -56,7 +56,7 @@ class DiscountSum(GradualSum):
         return item
 
 
-@pipeline("discount_sum")
+@pipeline("discount_sum")  # register the last pipe with a name, that is the pipeline
 class Save(DiscountSum):
     result_model = ResultItem
 
@@ -75,6 +75,13 @@ from datapipe import get_session
 sess=get_session()
 sess.run("discount_sum",SourceItem.objects.all())
 ```
+
+If you have celery worker running:
+```python
+from datapipe import get_session
+sess=get_session()
+sess.run_in_celery("discount_sum",SourceItem.objects.all(),queue=QUEUE_NAME)
+```
 ###Explain
 `SourceItem` is the input items, and the result will be put into `ResultItem`. Both of them are django Model with only a integer field name as number.
 
@@ -82,10 +89,11 @@ It's equivalent to this following code
 
 ```python
 source_list=[...]  # a list of numbers
+# prepare
 results=[]
 total=0
 discount=0.99
-for source in source_list:
+for source in source_list:  # process
     total+=source  # GradulSum
     results.append(total) # Save
     total*=0.99  # DiscountSum
@@ -108,13 +116,80 @@ Think about a `Pipeline` as the real assembly line.
 ![Pipeline](https://upload.wikimedia.org/wikipedia/commons/2/29/Ford_assembly_line_-_1913.jpg)
 
 * The whole assembly line sequence is a `Pipeline`.
-* The man placed in the certain postion of the sequence is a `Pipe`, it's been trained/designed to do specific works.
+* The man placed in the certain postion of the sequence is a `Pipe`, it's been teached to do specific works.
 * One man's work most times is rely on the other's work, so in datapipe, one `Pipe` inherit all the `Pipe` is rely on to specify the relationship of dependency. 
-* People process the item one by one, but the pipeline accept input(raw material) in batch,  In datapipe, when run the `Pipeline`, you feed a batch of input items to the `Session`, then each `Pipe` inside the `Pipeline` process the item one by one. Each `Pipe` can rewrite a method `prepare`, all items will be feed into this method as a batch preparation before the formal one-by-one process. 
-* In the end of the assembly line, there is a person to put multiple product to a big box then send it out. In datapipe, the output of pipeline, usually is an item will be write to the database. Most time the last `Pipe` is in charge of to merge all result of it's depends `Pipe` to the output object to save, then put it in the buffer. `Session` will responsible to save the output in batch periodically.
+* For convinience of development, each pipe can be running seperately,`output=Pipe.eval(item)`.
+* The worker process the item one by one, but the pipeline accept input(raw material) in batch. So if you need to do some preparation before the formal one-by-one process, you can rewrite a method `prepare(items)`.
+* The one-by-one process in running in the `pipe.process()` method. That is most your code lives in. The item is get by `item = super(GradualSum, self).process()`.
+* Also `Pipe` get a method `pipe.finish(results)` will be run after all items processing finished, all thing returned by the `result=pipe.process()` will go to it. 
+* In the end of the assembly line, there is a person to put all products to a big box then send it out. In datapipe, the outcome of pipeline, usually is an item will be write to the database. Most time the last `Pipe` is in charge of to merge all results from it's depends `Pipe` to the result object to save, then put it in the buffer by `self.add_to_save(result_item)`. `Session` will responsible to save the output in batch periodically.
 * There are spaces for people to put some intermediate product, will be used to shared to the later procedure. In datapipe, in the `Pipe`, there are there different containers. The `Pipe` instance `self`, `self.local` and `self.context`. You can do `self.total=1`,`self.local.total=1` or even `self.context.total=1`. The different between them is it's life span. `self` lives for only this one specific item; `self.local` lives for all the items but without the `chained pipeline`(will explain later); `self.context` lives all the time even with the `chained pipeline`. You can make an analogy with the assembly line, the varible put in `self` is as the man put some stuff in the bucket which on the conveyor belt next to the item to process, it can be used by next people, but when this item finished processing, this bucket will gone. `self.local` is like a big table, every people can put thing on it and be shared, but it will be clean up when all the batch of items finished. `self.context` is another table next `self.local`, what different is the stuff on it will be pack together with the output and send together to the next `Pipeline` chained on this `Pipeline`.     
 * All methods write under each `Pipe` can be used by all other connected pipes, like a wrench on the table. If it need to be mark as private to not confuse with others, you need to have it name starts with 2 underscores.
+* Reparse: The Pipeline will record the outputs with the correspond input. So when next time it saw the same input item again, it will remove the old outputs from database first, then do the processing again. So if you run the above run code 2 times, the count of ResultItem will not change.
+* Exception Handler: In assembly line, if some people get an error, which he has no idea how to deal with current situation(uncatched exception), he will take the item out of the conveyor belt, clean the intermediate outputs realated(rollback the database to the savepoint before start this item), and put it in some other bucket with the note of the situation(`PipelineError` Collector). **Then he moving on to the next item.** Periodically the engeneers will come to check and figure out what's happen and teach the worker how to deal with it(You fix the code). Then all the collected items will be put in the pipeline again in batch. 
+* Parallels: If the input comes too fast, you can easily open up another `Session` to running in parallels by increasing the number of workers or have other machines to run it at same time. 
+* Chained Pipeline:
+	* depends: if you need to do some pre-processing of items in batch, you can define a depends in the `Pipe`, for example
 
+```python
+@pipeline('main')
+class Main(Pipe):
+   depends=["being_depend"]  # **to specify the depends**
+   
+   def process(self):
+       item=super(Main,self).process()
+       print "main", item, item*1./self.context.depends_total
+       
+
+@pipeline("being_depend")
+class Depends(Pipe):
+	def prepare(items):
+	    items=super(Depends).prepare(items)
+	    self.context.depends_total=0
+	    return items
+	    
+	def process(self):
+	    item=super(Depends,self).process()
+	    print "depend", item
+	    self.context.depends_total+=item
+	    return item
+	    
+sess=get_session()
+sess.run([1,2],"main")
+# depend 1
+# depend 2
+# main 1, 0.33333333
+# main 2, 0.66666667
+```
+
+The BeingDepends get the same items as input and put the result in `self.context` then Main can access it.
+
+* 
+	* trigger:  one pipeline need to run right after some other pipeline finished and also has to runing standalone in some time.
+
+```python
+@pipeline("news.import")
+class NewsImport(Pipe):
+    def process(raw_item_store):
+        content=self.do_some_stuff_here(raw_item_store)
+        result_news=self.add_to_save(News(content=content))
+        return result_news
+        
+
+@pipeline("news.link.tags", trigger="news_import")
+class NewsTag(Pipe):
+	def process(news):
+	    tags_text=self.do_some_stuff_here()
+	    self.add_to_save(*[NewsTag(news=news,tag=tag_text) for tag_text in tags_text])
+	    return news 
+	    
+	    
+sess=get_session()
+sess.run([news1,news2],"news.link.tags") 
+# or
+sess.run([raw_item_store1, raw_item_store2],"news.import")
+# both run get "news.link.tags" run
+``` 
 
 Python class inheritance allow multiple inheritance, which perfectly emulate the branch nature of the data processing. With the [C3 algorithm](https://www.python.org/download/releases/2.3/mro/) of python, it just works.  
 
