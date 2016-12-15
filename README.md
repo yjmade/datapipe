@@ -1,30 +1,58 @@
 # DataPipe
-*a data processing framework let you build workflow just like making building blocks, and makes it run in parallels*
+*a framework let you build data processing procedure for production both easy and robust, and help you to deal with parallels, performancing, error handling, debugging and data reprocessing*
 
-##Concept
-In the project of my company, we are facing few challenges.
+##What for
+When building a procedure to process data, we are facing some challenges:
 
-- Input data come from different sources, like spiders, logs, they are in different machine, have to have a way to collect them together, and needs to be processed as soon as possible.
-- The input data get different types, need different flow to process.
-- For each flow, it get multiple steps to finish the work. For example, say I crawled a news website, so I need to see if the news has already existed in the database, then check if the author has already created, then check if the content is valid, then clean up the content... Finally, save the result to database. Some of the steps can be share between different flow, and some are not. Some step can be irelevent to the other steps so that it should be able to plug into the flow. So we want to build each step seperately, like a LEGO building block. Then assemble them together. If we do it right, the code should be clean, easy to read, easy to write, easy to maintain.
-- The data source like spider to provide input data may get problem, processing flow itself can have bugs too. So we need to track what has been written to database after one specific input data item has been processed, and be able to erase the outcome and reprocessing by feed the flow with the same item.
-- When bug happens, error and the enviroment should be logged, then rollback the database operation related to this input item. After the issue has been addressed, you should be able to put the items which throwed the error to the flow again with one single click.
-- When multiple results come, you should be able to processing them in parallels.
-- If the speed of processing is not enough, can easily scale up the workers.
+- Collect data from different data source and process it in real time.
+- Different procedure for different type of data.
+- The processing code should structured in a clean and elegant form, to make it easy to write, easy to read, and easy to extend. 
+- Reprocess the data and clean up the out result easily
+- Easy to debug by collecting the unhandled exception, and reprocess the data when bugs fixed.
+- Do not missing one data.
+- Run in parallels, and easily to scale up.
 - Monitoring ongoing process status.
-- All the boring staff just mentioned which has nothing to do with the processing flow, should be shared as much as possible, so that developer can put most attention to the building of the flow itself. 
 
-With all these requirments, I built this module. And it has been up and running for 2 years. Now I open source it, to share it as a infrastructure.
+This framework is build to solve all these problems. It has been up and running at my company for 2 years. 
 
 ##Prerequest
-Since we love python, and the project of the company is build with Django, so datapipe is made as a Django reusable module.
+1. datapipe is made as a Django reusable module
+2. `Postgres` 9.4 or above is required as we need the `jsonb` field type.
+3. [`Celery`](http://celeryproject.org) is required for concurrent processing.
 
-Also, some of the features rely on the postgres's `jsonb` field, so the minimal requirment is to configure the `PipelineTrack` model to use the postgres database.
+
+##Installation
+```bash
+pip install datapipe
+```
+Then add `datapipe` and `django-errorlog` to `INSTALLED_APPS` of Django's settings.
+
+Now you can write pipes at pipes.py under each apps.
+
+To start celery worker to run pipeline in parallels, check out the [docs of Celery](http://docs.celeryproject.org/en/latest/django/first-steps-with-django.html#django-first-steps).
+
+## Terminology
+- `Pipe` is a single data processing step
+- `Pipeline` is the assemble of multiple pipes. 
+- `Session` is in charge of managing the running Pipelines.
 
 ##How it works
-In the project, we build all the processing procedure with datapipe, and run it as a daemon. Then, have a MQ(Message Queue) to link to daemon with different data sources. Each different data source will throw raw data into the MQ, then datapipe starts to process it in parallels.
+In the project of my company, there is a MQ(message queue), and the datapipe running inside Celery workers which listen to the MQ. Then when any  data source put data in the MQ, datapipe will start to processing.
+Say here is a piece of code:
 
-Here is an example of how the datapipe looks like: [source](https://github.com/yjmade/datapipe/blob/master/tests/simple/pipes/__init__.py)
+```python
+source_list=[...]  # a list of numbers
+# prepare
+results=[]
+total=0
+discount=0.99
+for source in source_list:  # process
+    total+=source  # GradulSum
+    results.append(total) # Save
+    total*=0.99  # DiscountSum
+``` 
+
+And following is the equavilent pipeline: [source](https://github.com/yjmade/datapipe/blob/master/tests/simple/pipes/__init__.py)
 
 ```python
 # -*- coding: utf-8 -*-
@@ -33,6 +61,7 @@ from datapipe.pipe import Pipe, pipeline
 
 
 class GradualSum(Pipe):
+    """initialize total and add number for each item to it"""
 
     def prepare(self, items):
         assert isinstance(items[0], SourceItem)
@@ -47,6 +76,7 @@ class GradualSum(Pipe):
 
 
 class DiscountSum(GradualSum):
+    """discount the total"""
     discount = 0.99
 
     def process(self):
@@ -58,6 +88,8 @@ class DiscountSum(GradualSum):
 
 @pipeline("discount_sum")  # register the last pipe with a name, that is the pipeline
 class Save(DiscountSum):
+    """save current total to result"""
+    
     result_model = ResultItem
 
     def process(self):
@@ -67,69 +99,77 @@ class Save(DiscountSum):
         return item
 
 ```
+`SourceItem` is the input items, and the result will be put into `ResultItem`. Both of them are django Model with only an integer field named `number`.
 
-To run it:
+In above code piece, we build a pipeline named `discount_sum`, contains three pipes, which is `GradualSum `, `DiscountSum` and `Save`.
+
+To run the pipeline:
 
 ```python
 from datapipe import get_session
-sess=get_session()
-sess.run("discount_sum",SourceItem.objects.all())
+sess=get_session()  # create the session instance
+sess.run("discount_sum",SourceItem.objects.all())  # run discount_sum pipeline to all the SourceItems
 ```
 
-If you have celery worker running:
+Run it in parallels with celery worker:
+
 ```python
 from datapipe import get_session
 sess=get_session()
 sess.run_in_celery("discount_sum",SourceItem.objects.all(),queue=QUEUE_NAME)
 ```
-###Explaination
-`SourceItem` is the input items, and the result will be put into `ResultItem`. Both of them are django Model with only an integer field named `number`.
-
-It's equivalent to this following code
-
-```python
-source_list=[...]  # a list of numbers
-# prepare
-results=[]
-total=0
-discount=0.99
-for source in source_list:  # process
-    total+=source  # GradulSum
-    results.append(total) # Save
-    total*=0.99  # DiscountSum
-``` 
-
-There are three main concepts in datapipe:
-
-- `Pipe` is a single data processing step
-- `Pipeline` is the assemble of multiple Pipes to one procedure. 
-- `Session` is in charge of managing the running Pipelines.
-
-In the above example, we have build one `Pipeline` with 3 `Pipe`.
-
-Datapipe uses python buildin class inheritance to assemble the Pipes together. So, the 1st step pipe `GradualSum` is a class inherited from `Pipe`, and next step pipe inherits from the previous step pipe. 
-<!--
-Why we use inherit to connect the `Pipe`?-->
+##Explaination
 
 Think about a `Pipeline` as the real assembly line.
 
 ![Pipeline](https://upload.wikimedia.org/wikipedia/commons/2/29/Ford_assembly_line_-_1913.jpg)
 
-* The whole assembly line sequence is a `Pipeline`.
-* The man placed in the certain postion of the sequence is a `Pipe`, he's been taught to do specific work.
-* One man's work can rely on the other's, so in datapipe, one `Pipe` inherit all the `Pipe`s it relies on, to specify the relationship of dependency. 
-* For convinience of development, each pipe can be running seperately,`output=Pipe.eval(item)`.
-* The worker process the item one by one, but the pipeline accepts input(raw material) in batch. So if you need to do some preparation before the formal one-by-one process, you can rewrite a method `prepare(items)`.
-* The one-by-one process in running in the `pipe.process()` method, where most of your code lives in. The item is get by `item = super(GradualSum, self).process()`.
-* Inherited `Pipe` has the method `pipe.finish(results)` and will be called after all processing items are finished. Results returned by the `result=pipe.process()` will go to this method. 
-* At the end of the assembly line, there is a person responsible to put all products to a big box and send it out. In datapipe, the outcome of pipeline, usually is an item that will be written to database. Usually the last `Pipe` is in charge of merging all results from it's depending `Pipe`s to store them in result object, then put the result object in the buffer by `self.add_to_save(result_item)`. `Session` is responsible to save the output in batch periodically.
-* There are containers for people to store some half products, which will be used later. In datapipe, in the `Pipe`, there are three different containers. The `Pipe` instance `self`, `self.local` and `self.context`. You can do `self.total=1`,`self.local.total=1` or even `self.context.total=1`. The difference between them is it's life span. `self` lives for only this one specific item; `self.local` lives for all the items but without the `chained pipeline`(will explain later); `self.context` lives all the time even with the `chained pipeline`. You can make an analogy with the assembly line, the variable put in `self` is like there is a bucket together with the item on the conveyor belt, workers can put some stuff in it and these stuff can be used by other person, but after the process of the item has finished, this bucket will gone. `self.local` is like a big table, every people can put thing on it and be shared, but it will be clean up when all the batch of items finished. `self.context` is another table next `self.local`, what different is the stuff on it will be pack together with the output and send together to the next `Pipeline` chained on this `Pipeline`.     
-* All methods written under each `Pipe` can be used by all other connected pipes, like a wrench on the table. If they need to be marked as private not to be confused with others, you need to name them with 2 beginning underscores.
-* Reparse: The Pipeline will record the outputs with the corresponding input item. Next time, when it will see the same input item again, it will remove the old outputs from database first and do the processing again. So if you run the above run code 2 times, the count of ResultItem will not change.
-* Exception Handler: In assembly line, if some person gets an error, which he has no idea how to deal with in current situation(uncatched exception), he will take the item out of the conveyor belt, clean the related intermediate outputs(rollback the database to the savepoint before starting this item), and put it in some other bucket with a note of the situation(`PipelineError` Collector). **Then he moves on to the next item.** Periodically the engeneers will come to check the error colletor bucket and figure out what has happened and teach the worker how to deal with it(You fix the code). Then all the collected items will be put in the pipeline again in batch. 
-* Parallels: If the input comes too fast, you can easily open up another `Session` to run it in parallels by increasing the number of workers or have other machines to run it at same time. ##TODO
-* Chained Pipeline:
-	* depends: if you need to do some pre-processing of items in batch, you can define a depends in the `Pipe`, for example
+### Execute flow
+
+* At runtime, a list of input items will be feed into pipeline.
+
+* Method `pipe.prepare(items)` will be called with all the input items, it returns a list of items to be processed. It's like there's person stand before the conveyor belt to do some check of the items and filter the bad input. 
+
+* Method `pipe.process(item)` will run with the items `prepare(items)` returned one by one. 
+
+* Non-None return of the `pipe.process(item)` will be collected, and be sent to `pipe.finish(results)` after all input item `process()` finished.
+
+Following pseudo code shows how this processing go:
+
+```python
+def run(pipeline, items):
+    prepared_item = pipeline().prepare(items)
+    results=[]
+    for item in prepared_items:
+        result=pipeline().process(item)
+        if result is not None:
+            results.append(result)
+    pipeline().finish(results)
+           
+``` 
+
+* In `process()`,when processing one item, you can control the flow by throwing the following exceptions:
+	* `PipeContinue`: stop the processing of current item, continue processing next item;
+	* `PipeIgnore`:   stop the processing of current item, rollback to the beginning of this item, continue processing next item;
+	* `PipeBreak`:    stop the processing of current item, rollback to the beginning of this item, stop processing the rest items;
+	* `PipeError`:    stop processing, rollback all the items.
+
+###Pipeline assemble
+
+* The whole assembly line sequence is a `Pipeline`, numbers of worker(`Pipe`) which do specific work are included.
+
+* The work of each worker has dependency. In datapipe, dependency relationship represented by inheritance of the pipes. 
+
+* The side effect of pipe inheritance is that methods and properties written under each `Pipe` can be accessed by all other connected pipes. It's suggested to name the methods and properties of the pipe with 2 beginning underscores, to avoid unintention name collision.
+
+* Python allow multiple inheritance, which perfectly emulate the branch nature of the data processing. So one `Pipe` can be inherited from multiple pipes, You have to make sure you have call the same method of the super class in the `prepare`/`process`/`finish` methods, and return the result properly. The executing order is compling to the [C3 algorithm](https://www.python.org/download/releases/2.3/mro/) of python.
+
+* For convinience of development, each pipe can be running seperately, `output=Pipe.eval(item)`.
+
+*At the first version of datapipe, I was using a list of Pipe classes to stand for different steps, and session instace pass the output of one pipe to the next one as the input. But soon I find it's not flexable enough, and hard to share variables.*
+
+###Pipeline Chaining
+* depends: if you need to do some pre-processing of items in batch, you can define a depends in the `Pipe`, for example
 
 ```python
 @pipeline('main')
@@ -162,10 +202,9 @@ sess.run([1,2],"main")
 # main 2, 0.66666667
 ```
 
-The BeingDepends get the same items as input and puts the result in `self.context` then `Main` can access it.
+The `BeingDepends` get the same items as input and puts the result in `self.context` then `Main` can access it.
 
-* 
-	* trigger:  one pipeline needs to run right after some other pipeline finished and also has to run standalone in some time.
+* trigger:  one pipeline needs to run right after some other pipeline finished and also has to run standalone in some time.
 
 ```python
 @pipeline("news.import")
@@ -185,16 +224,32 @@ class NewsTag(Pipe):
 	    
 	    
 sess=get_session()
-sess.run([news1,news2],"news.link.tags") 
+sess.run([news1,news2],"news.link.tags")  # run standalone
 # or
-sess.run([raw_item_store1, raw_item_store2],"news.import")
-# both run get "news.link.tags" run
+sess.run([raw_item_store1, raw_item_store2],"news.import") # news.link.tags will run after news.import finished
 ``` 
 
-Python class inheritance allow multiple inheritance, which perfectly emulate the branch nature of the data processing. With the [C3 algorithm](https://www.python.org/download/releases/2.3/mro/) of python, it just works.  
+###Varible Sharing
+In assembly line there are containers for people to store some half products, which will be used later. 
 
-*At the first version of datapipe, I was using a list of Pipe classes to stand for different node, and session instace pass the output of one element to the next one as the input, but soon I find it's not flexable enough, and hard to share variables.*
+In datapipe, in the `Pipe`, there are three containers with different life span you can put varible by set attribute.
+ 
+* `self` lives for only this one specific item; 
+* `self.local` lives for all the items, and be cleaned at `finish()`; 
+* `self.context` shared with all the chained pipeline. 
+ 
+You can make an analogy with the assembly line, the variable put in `self` is like there is a bucket together with the item on the conveyor belt, workers can put some stuff in it and these stuff can be used by other person, but after the process of the item has finished, this bucket will gone. `self.local` is like a big table, every people can put thing on it and be shared, but it will be clean up when all the batch of items finished. `self.context` is another table next `self.local`, what different is the stuff on it will be pack together with the output and send together to the next `Pipeline` be chained.  
 
+
+###Result and Error Handling
+
+* Pipe provide a method `pipe.add_to_save(result_item)` to let you put a to be saved Django Model object in the buffer,  `Session` will periodically do the save in batch for the sake of performance. Also the object put in the `add_to_save` will be tracked for reparse.   
+
+* Reparse: When pipeline see one input item that has been processed before, it will remove the result item tracked by add_to_save from database before do the processing again. This feature is usedful when you changed the code of pipes and the output is also changed, then you just need to run this pipeline with old items, the old results will be removed and the new results will be saved.
+
+* Exception Handler: In assembly line, if some person gets an error, which he has no idea how to deal with in current situation(uncatched exception), he will take the item out of the conveyor belt, clean the related intermediate outputs(rollback the database to the savepoint before starting this item), and put it in some other bucket with a note of the situation(`PipelineError` Collector). **Then he moves on to the next item.** Periodically the engeneers will come to check the error colletor bucket and figure out what has happened and teach the worker how to deal with it(You fix the code). Then all the collected items will be put in the pipeline again. 
+
+* Concurrent: `sess.run_in_celery(items,pipeline_name,[celery_chunksize=10, queue=None])` will split the input items into chunks, the size of chunk is control by celery_chunksize. Then it will send each chunk to celery worker asynchronously, and celery will run the pipeline in parallels.
 
 
 ##TODO
