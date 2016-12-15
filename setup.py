@@ -6,6 +6,8 @@ import sys
 if 'sdist' in sys.argv:
     from pypandoc import convert
     long_description = convert('README.md', 'rst')
+else:
+    long_description = None
 VERSION = "0.1.0"
 
 setup(
