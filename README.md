@@ -1,7 +1,7 @@
 # DataPipe
 *a framework let you build data processing procedure for production both easy and robust, and help you to deal with parallels, performancing, error handling, debugging and data reprocessing*
 
-##What for
+## What for
 When building a procedure to process data, we are facing some challenges:
 
 - Collect data from different data source and process it in real time.
@@ -15,13 +15,13 @@ When building a procedure to process data, we are facing some challenges:
 
 This framework is build to solve all these problems. It has been up and running at my company for 2 years. 
 
-##Prerequest
+## Prerequest
 1. datapipe is made as a Django reusable module
 2. `Postgres` 9.4 or above is required as we need the `jsonb` field type.
 3. [`Celery`](http://celeryproject.org) is required for concurrent processing.
 
 
-##Installation
+## Installation
 ```bash
 pip install datapipe
 ```
@@ -36,7 +36,7 @@ To start celery worker to run pipeline in parallels, check out the [docs of Cele
 - `Pipeline` is the assemble of multiple pipes. 
 - `Session` is in charge of managing the running Pipelines.
 
-##How it works
+## How it works
 In the project of my company, there is a MQ(message queue), and the datapipe running inside Celery workers which listen to the MQ. Then when any  data source put data in the MQ, datapipe will start to processing.
 Say here is a piece of code:
 
@@ -118,7 +118,7 @@ from datapipe import get_session
 sess=get_session()
 sess.run_in_celery("discount_sum",SourceItem.objects.all(),queue=QUEUE_NAME)
 ```
-##Explaination
+## Explaination
 
 Think about a `Pipeline` as the real assembly line.
 
@@ -154,7 +154,7 @@ def run(pipeline, items):
 	* `PipeBreak`:    stop the processing of current item, rollback to the beginning of this item, stop processing the rest items;
 	* `PipeError`:    stop processing, rollback all the items.
 
-###Pipeline assemble
+### Pipeline assemble
 
 * The whole assembly line sequence is a `Pipeline`, numbers of worker(`Pipe`) which do specific work are included.
 
@@ -168,7 +168,7 @@ def run(pipeline, items):
 
 *At the first version of datapipe, I was using a list of Pipe classes to stand for different steps, and session instace pass the output of one pipe to the next one as the input. But soon I find it's not flexable enough, and hard to share variables.*
 
-###Pipeline Chaining
+### Pipeline Chaining
 * depends: if you need to do some pre-processing of items in batch, you can define a depends in the `Pipe`, for example
 
 ```python
@@ -229,7 +229,7 @@ sess.run([news1,news2],"news.link.tags")  # run standalone
 sess.run([raw_item_store1, raw_item_store2],"news.import") # news.link.tags will run after news.import finished
 ``` 
 
-###Varible Sharing
+### Varible Sharing
 In assembly line there are containers for people to store some half products, which will be used later. 
 
 In datapipe, in the `Pipe`, there are three containers with different life span you can put varible by set attribute.
@@ -241,7 +241,7 @@ In datapipe, in the `Pipe`, there are three containers with different life span 
 You can make an analogy with the assembly line, the variable put in `self` is like there is a bucket together with the item on the conveyor belt, workers can put some stuff in it and these stuff can be used by other person, but after the process of the item has finished, this bucket will gone. `self.local` is like a big table, every people can put thing on it and be shared, but it will be clean up when all the batch of items finished. `self.context` is another table next `self.local`, what different is the stuff on it will be pack together with the output and send together to the next `Pipeline` be chained.  
 
 
-###Result and Error Handling
+### Result and Error Handling
 
 * Pipe provide a method `pipe.add_to_save(result_item)` to let you put a to be saved Django Model object in the buffer,  `Session` will periodically do the save in batch for the sake of performance. Also the object put in the `add_to_save` will be tracked for reparse.   
 
@@ -252,5 +252,5 @@ You can make an analogy with the assembly line, the variable put in `self` is li
 * Concurrent: `sess.run_in_celery(items,pipeline_name,[celery_chunksize=10, queue=None])` will split the input items into chunks, the size of chunk is control by celery_chunksize. Then it will send each chunk to celery worker asynchronously, and celery will run the pipeline in parallels.
 
 
-##TODO
+## TODO
 get the reparse entity in the pipe
